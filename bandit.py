@@ -12,7 +12,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.set_default_dtype(torch.float64)
 # Bandit environment
 class Environment(object):
-    def __init__(self, total, good):
+    def __init__(self, total=4, good=1):
         """
         A simple multi-arm bandit ennvironment for conventions. Creates an environment with 
         given number of arms and good arms. Returns reward = 1.0 if good arm pulled and -1
