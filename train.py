@@ -34,7 +34,7 @@ if __name__ == '__main__':
 
     # Stable Baselines provides you with make_vec_env() helper
     # which does exactly the previous steps for you:
-    env = make_vec_env(env_id, n_envs=num_cpu, seed=0)
+    # env = make_vec_env(env_id, n_envs=num_cpu, seed=0)
 
     policy_kwargs = dict(activation_fn=nn.Tanh, net_arch=[10, 5])
     # env = gym.make(env_id, total=10, good=3)
