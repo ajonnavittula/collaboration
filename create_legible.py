@@ -43,7 +43,7 @@ class TrajOpt(object):
         cost_total = 0
         smoothcost_xi = 0
         dist2goal = 0
-        cost_scale = 10
+        cost_scale = len(xi)
         for idx in range(1, self.n_waypoints):
             # state cost goes here
             point = xi[idx]
@@ -53,11 +53,11 @@ class TrajOpt(object):
             cost_total += cost_state * cost_scale
             dist2goal += np.linalg.norm(self.goals[1] - point)
             if cost_scale > 1:
-                cost_scale = len(xi) - 1
+                cost_scale = len(xi) - idx
             smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
         # perhaps you have some overall trajectory cost
-        cost_total += 5 * smoothcost_xi
-        cost_total += 0.1 * dist2goal
+        cost_total += 10 * smoothcost_xi
+        # cost_total += 0.1 * dist2goal
         return cost_total
 
     """ limit the actions to the given action set for trajectory"""
@@ -111,42 +111,9 @@ def main():
 
     traj_opt =TrajOpt(traj, goals)
     
-    # traj, res, t = traj_opt.optimize()
-    # ax.plot(traj[:,0], traj[:,1])
-    action_limit = 0.01
-    for i in range(5):
-        print("Optimizing with {0}".format(action_limit))
-        traj, res, t = traj_opt.optimize()
-        ax.plot(traj[:,0], traj[:,1])
-        action_limit += 0.01
-        traj_opt.action_limit = action_limit
+    traj, res, t = traj_opt.optimize()
+    ax.plot(traj[:,0], traj[:,1])
 
-
-    # print(traj)
-
-    
-
-    # ax.plot(traj[:,0], traj[:,1])
-    # A = np.zeros((len(traj)+1, len(traj)))
-
-    # for i in range(len(traj)):
-    #     f = 1
-    #     A[i+1, i] = f * (i+1)
-    #     if not i == 0:
-    #         A[i, i] = -f * (i+1)
-    #     if f > 1:
-    #         f -= 5
-        
-    # G1 = np.asarray([0.8, 0.3])
-    # G2 = np.asarray([0.8, 0.4])
-
-    # for i in range(100):
-    #     grad = leg_grad(G1, G2, traj)
-    #     traj += 0.01 * np.matmul(np.linalg.inv(np.matmul(A.T, A)), grad)
-    #     ax.plot(traj[:,0], traj[:,1])
-
-    # ax.set_xlim(0, 1)
-    # ax.set_ylim(0, 1)
     plt.show()
 
 
