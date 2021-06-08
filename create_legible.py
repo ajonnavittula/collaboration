@@ -10,20 +10,6 @@ import pickle
 import matplotlib.pyplot as plt
 
 
-def leg_grad(G1, G2, traj):
-    # Compute legibility gradient
-    p_g1 = 1
-    p_g2 = 1
-    grad = []
-    for point in traj:
-        # print(point)
-        p_g1 += 1. / (1 + np.exp(-1.0/np.linalg.norm(G1 - point)))
-        p_g2 += 1. / (1 + np.exp(-1.0/np.linalg.norm(G2 - point)))
-        p = p_g1 + p_g2
-        grad.append([p_g2/p, p_g2/p])
-    # grad = np.ones([len(traj), 2]) * (p_g1/p)
-    return grad
-
 class TrajOpt(object):
 
     def __init__(self, traj, goals):
