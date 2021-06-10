@@ -40,7 +40,7 @@ class TrajOpt(object):
         self.xi0 = np.asarray(traj)
         self.action_limit = 0.05
 
-    """ Find most likely goal using Bayesian Inference """
+    """ Find most likely goal using Bayesian Inference"""
     def bayes(self, pos):
         return np.argmax(np.linalg.norm(self.goalset - pos))
 
