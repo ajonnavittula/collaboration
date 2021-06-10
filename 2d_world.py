@@ -33,11 +33,15 @@ class TrajOpt(object):
         self.n_waypoints = len(traj)
         self.n_joints = len(traj[0])
         self.home = traj[0]
-        self.goals = goals
-        """ create initial trajectory """
+        # Set of all possible goals
+        self.goalset = goals
+        # current predicted goal
+        self.goal_idx = None
         self.xi0 = np.asarray(traj)
         self.action_limit = 0.05
 
+    def bayes(self, pos):
+        return np.argmax(np.linalg.norm(self.goalset - pos))
 
     """ problem specific cost function """
     def trajcost(self, xi):
@@ -59,7 +63,7 @@ class TrajOpt(object):
             smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
         # perhaps you have some overall trajectory cost
         cost_total += 10 * smoothcost_xi
-        # cost_total += 0.1 * dist2goal
+        cost_total += 0.1 * dist2goal
         return cost_total
 
     """ limit the actions to the given action set for trajectory"""
@@ -87,6 +91,13 @@ class TrajOpt(object):
 
     """ use scipy optimizer to get optimal trajectory """
     def optimize(self, method='SLSQP'):
+        if self.goal is None:
+            self.goal = goal[self.bayes()]
+        else:
+            idx = self.bayes()
+            if not self.goal_idx == idx:
+                self.goal_idx = idx
+
         cons = [{'type': 'eq', 'fun': self.cardinal_cons},
         {'type': 'ineq', 'fun': self.action_constraint}]
         start_t = time.time()
