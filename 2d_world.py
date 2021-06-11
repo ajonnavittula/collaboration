@@ -41,7 +41,7 @@ class TrajOpt(object):
         self.action_limit = 0.05
 
     """ Find most likely goal using Bayesian Inference """
-    def bayes(self, pos):
+    def predict(self, pos):
         return np.argmax(np.linalg.norm(self.goalset - pos))
 
     """ problem specific cost function """
@@ -88,16 +88,24 @@ class TrajOpt(object):
         end = xi[-1, :]
 
         return np.linalg.norm(start - self.home) + \
-                np.linalg.norm(end - self.goals[1])
+                np.linalg.norm(end - self.goals[self.goal_idx])
+
+    """ Check if traj update required """
+    def update(self):
+        update = False
+        if self.goal is None:
+            self.goal = goal[self.predict()]
+            update = True
+        else:
+            idx = self.predict()
+            if not self.goal_idx == idx:
+                self.goal_idx = idx
+                update = True
+        if update:
+            self.optimize()
 
     """ use scipy optimizer to get optimal trajectory """
     def optimize(self, method='SLSQP'):
-        if self.goal is None:
-            self.goal = goal[self.bayes()]
-        else:
-            idx = self.bayes()
-            if not self.goal_idx == idx:
-                self.goal_idx = idx
 
         cons = [{'type': 'eq', 'fun': self.cardinal_cons},
         {'type': 'ineq', 'fun': self.action_constraint}]
