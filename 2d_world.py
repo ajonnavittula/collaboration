@@ -4,7 +4,10 @@ import os
 import math
 import numpy as np
 import time
+from scipy.optimize import minimize
+from scipy.optimize import LinearConstraint
 import pickle
+import matplotlib.pyplot as plt
 
 
 class Joystick(object):
@@ -39,7 +42,11 @@ class TrajOpt(object):
         self.goal_idx = None
         self.xi0 = np.zeros((len(goals), self.n_waypoints, self.n_joints))
         self.action_limit = 0.05
-
+        for waypoint in range(self.n_waypoints):
+            for goal in range(len(goals)):
+                self.xi0[goal, waypoint, :] = self.home + waypoint /(self.n_waypoints - 1.0)\
+                                                 * (self.goalset[goal] - self.home) 
+        self.optimize()
     """ Find most likely goal using Bayesian Inference """
     def predict(self, pos):
         return np.argmax(np.linalg.norm(self.goalset - pos))
@@ -54,10 +61,12 @@ class TrajOpt(object):
         for idx in range(1, self.n_waypoints):
             # state cost goes here
             point = xi[idx]
-            costs = np.exp(-np.linalg.norm(self.goals - point))
-            cost_state = costs[self.goal_idx] / np.sum(costs)
+            costs = []
+            for i in range(len(self.goalset)):
+                costs.append(np.exp(-np.linalg.norm(self.goalset[i] - point)))
+            cost_state = 1 - costs[self.goal_idx] / np.sum(costs)
             cost_total += cost_state * cost_scale
-            dist2goal += np.linalg.norm(self.goals[self.goal_idx] - point)
+            dist2goal += np.linalg.norm(self.goalset[self.goal_idx] - point)
             if cost_scale > 1:
                 cost_scale = len(xi) - idx
             smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
@@ -87,7 +96,7 @@ class TrajOpt(object):
         end = xi[-1, :]
 
         return np.linalg.norm(start - self.home) + \
-                np.linalg.norm(end - self.goals[self.goal_idx])
+                np.linalg.norm(end - self.goalset[self.goal_idx])
 
     """ Check if traj update required """
     def update(self):
@@ -104,10 +113,24 @@ class TrajOpt(object):
 
         cons = [{'type': 'eq', 'fun': self.cardinal_cons},
         {'type': 'ineq', 'fun': self.action_constraint}]
-        start_t = time.time()
-        res = minimize(self.trajcost, self.xi0, method=method, constraints=cons)
-        xi = res.x.reshape(self.n_waypoints,self.n_joints)
-        return xi, res, time.time() - start_t
+        for idx in range(len(self.goalset)):
+            print("Optimizing goal {}".format(idx))
+            self.goal_idx = idx
+            start_t = time.time()
+            xi0 = self.xi0[idx, :, :]
+            xi0.reshape(-1)
+            res = minimize(self.trajcost, xi0, method=method, constraints=cons)
+            xi = res.x.reshape(self.n_waypoints,self.n_joints)
+            self.xi0[idx, :, :] = xi
+
+    """ Plot legible trajectories """
+    def plot(self):
+        fig, ax = plt.subplots()
+        for i in range(len(self.goalset)):
+            ax.plot(self.xi0[i, :, 0], self.xi0[i, :, 1])
+
+        plt.show()
+
         
 class Object(pygame.sprite.Sprite):
 
@@ -156,81 +179,85 @@ def main():
     savename = "data/demos/" + filename + ".pkl"
 
     clock = pygame.time.Clock()
-    pygame.init()
+    # pygame.init()
     fps = 30
 
-    world = pygame.display.set_mode([700, 700])
+    # world = pygame.display.set_mode([700, 700])
     position_player = np.asarray([.1, .35])
     postition_blue = np.asarray([0.8, 0.4])
     postition_green = np.asarray([0.8, 0.3])
     postition_gray = np.asarray([0., 0.])
     obs_position = postition_blue.tolist() + postition_green.tolist() + postition_gray.tolist()
 
+    opt = TrajOpt(position_player, [postition_blue, postition_green])
+    # print(opt.home)
+    # print(opt.xi0)
+    opt.plot()
 
-    player = Player(position_player)
-    blue = Object(postition_blue, [0, 0, 255])
-    green = Object(postition_green, [0, 255, 0])
-    gray = Object(postition_gray, [128, 128, 128])
+    # player = Player(position_player)
+    # blue = Object(postition_blue, [0, 0, 255])
+    # green = Object(postition_green, [0, 255, 0])
+    # gray = Object(postition_gray, [128, 128, 128])
 
-    sprite_list = pygame.sprite.Group()
-    sprite_list.add(player)
-    sprite_list.add(blue)
-    sprite_list.add(green)
-    sprite_list.add(gray)
+    # sprite_list = pygame.sprite.Group()
+    # sprite_list.add(player)
+    # sprite_list.add(blue)
+    # sprite_list.add(green)
+    # sprite_list.add(gray)
 
-    world.fill((0,0,0))
-    sprite_list.draw(world)
-    pygame.display.flip()
-    clock.tick(fps)
+    # world.fill((0,0,0))
+    # sprite_list.draw(world)
+    # pygame.display.flip()
+    # clock.tick(fps)
 
-    demonstration = []
-    sampletime = 5
-    count = 0
+    # demonstration = []
+    # sampletime = 5
+    # count = 0
 
-    while True:
+    # while True:
 
-        q = np.asarray([player.x, player.y])
-        # s = obs_position + q.tolist()
-        s = q.tolist()
+    #     q = np.asarray([player.x, player.y])
+    #     # s = obs_position + q.tolist()
+    #     s = q.tolist()
 
-        stop = 0
-        z1 = 0
-        z2 = 0
-        action = [0, 0]
-        left = pygame.key.get_pressed()[pygame.K_LEFT]
-        up = pygame.key.get_pressed()[pygame.K_UP]
-        down = pygame.key.get_pressed()[pygame.K_DOWN]
-        right = pygame.key.get_pressed()[pygame.K_RIGHT]
-        stop = pygame.key.get_pressed()[pygame.K_RETURN]
+    #     stop = 0
+    #     z1 = 0
+    #     z2 = 0
+    #     action = [0, 0]
+    #     left = pygame.key.get_pressed()[pygame.K_LEFT]
+    #     up = pygame.key.get_pressed()[pygame.K_UP]
+    #     down = pygame.key.get_pressed()[pygame.K_DOWN]
+    #     right = pygame.key.get_pressed()[pygame.K_RIGHT]
+    #     stop = pygame.key.get_pressed()[pygame.K_RETURN]
         
-        z1 = right - left
-        z2 = down - up
+    #     z1 = right - left
+    #     z2 = down - up
 
-        action = [z1, z2]
+    #     action = [z1, z2]
 
-        if stop:
-            pickle.dump( demonstration, open( savename, "wb" ) )
-            print(demonstration)
-            print("[*] Done!")
-            print("[*] I recorded this many datapoints: ", len(demonstration))
-            pygame.quit(); sys.exit()
+    #     if stop:
+    #         pickle.dump( demonstration, open( savename, "wb" ) )
+    #         print(demonstration)
+    #         print("[*] Done!")
+    #         print("[*] I recorded this many datapoints: ", len(demonstration))
+    #         pygame.quit(); sys.exit()
 
-        q += np.asarray(action) * 0.01
+    #     q += np.asarray(action) * 0.01
 
-        # dynamics
-        player.update(q)
+    #     # dynamics
+    #     player.update(q)
 
-        # animate
-        world.fill((0,0,0))
-        sprite_list.draw(world)
-        pygame.display.flip()
-        clock.tick(fps)
+    #     # animate
+    #     world.fill((0,0,0))
+    #     sprite_list.draw(world)
+    #     pygame.display.flip()
+    #     clock.tick(fps)
 
-        pygame.event.pump()
-        # save
-        if not count % sampletime:
-            demonstration.append(s)
-        count += 1
+    #     pygame.event.pump()
+    #     # save
+    #     if not count % sampletime:
+    #         demonstration.append(s)
+    #     count += 1
 
 if __name__ == "__main__":
     main()
