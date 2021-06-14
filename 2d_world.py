@@ -33,7 +33,7 @@ class TrajOpt(object):
 
     def __init__(self, home, goals):
         """ set hyperparameters """
-        self.n_waypoints = 30
+        self.n_waypoints = 11
         self.n_joints = 2
         self.home = home
         # Set of all possible goals
@@ -45,7 +45,7 @@ class TrajOpt(object):
         for waypoint in range(self.n_waypoints):
             for goal in range(len(goals)):
                 self.xi0[goal, waypoint, :] = self.home + waypoint /(self.n_waypoints - 1.0)\
-                                                 * (self.goalset[goal] - self.home) 
+                                                 * (self.goalset[goal] - self.home)
         self.optimize()
 
     """ Find most likely goal using Bayesian Inference """
@@ -134,7 +134,7 @@ class TrajOpt(object):
 
     """ Plot legible trajectories """
     def plot(self):
-        fig, ax = plt.subplots()
+        # fig, ax = plt.subplots()
         for i in range(len(self.goalset)):
             ax.plot(self.xi0[i, :, 0], self.xi0[i, :, 1])
 
@@ -194,7 +194,7 @@ def main():
     obs_position = postition_blue.tolist() + postition_green.tolist() + postition_gray.tolist()
 
     opt = TrajOpt(position_player, [postition_blue, postition_green])
-    P_gain = 0.1
+    P_gain = 0.01
 
     plot = False
     if plot:
