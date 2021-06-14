@@ -28,16 +28,16 @@ class Joystick(object):
 
 class TrajOpt(object):
 
-    def __init__(self, traj, goals):
+    def __init__(self, home, goals):
         """ set hyperparameters """
-        self.n_waypoints = len(traj)
-        self.n_joints = len(traj[0])
-        self.home = traj[0]
+        self.n_waypoints = 30
+        self.n_joints = 2
+        self.home = home
         # Set of all possible goals
         self.goalset = goals
         # current predicted goal
         self.goal_idx = None
-        self.xi0 = np.asarray(traj)
+        self.xi0 = np.zeros((len(goals), self.n_waypoints, self.n_joints))
         self.action_limit = 0.05
 
     """ Find most likely goal using Bayesian Inference """
@@ -54,11 +54,10 @@ class TrajOpt(object):
         for idx in range(1, self.n_waypoints):
             # state cost goes here
             point = xi[idx]
-            cost_g1 = np.exp(-np.linalg.norm(self.goals[0] - point))
-            cost_g2 = np.exp(-np.linalg.norm(self.goals[1] - point))
-            cost_state = cost_g1 / (cost_g1 + cost_g2)
+            costs = np.exp(-np.linalg.norm(self.goals - point))
+            cost_state = costs[self.goal_idx] / np.sum(costs)
             cost_total += cost_state * cost_scale
-            dist2goal += np.linalg.norm(self.goals[1] - point)
+            dist2goal += np.linalg.norm(self.goals[self.goal_idx] - point)
             if cost_scale > 1:
                 cost_scale = len(xi) - idx
             smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
@@ -95,14 +94,10 @@ class TrajOpt(object):
         update = False
         if self.goal is None:
             self.goal = goal[self.predict()]
-            update = True
         else:
             idx = self.predict()
             if not self.goal_idx == idx:
                 self.goal_idx = idx
-                update = True
-        if update:
-            self.optimize()
 
     """ use scipy optimizer to get optimal trajectory """
     def optimize(self, method='SLSQP'):
