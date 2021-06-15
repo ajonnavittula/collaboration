@@ -48,13 +48,6 @@ class TrajOpt(object):
                                                  * (self.goalset[goal] - self.home)
         self.optimize()
 
-    """ Find most likely goal using Bayesian Inference """
-    def predict(self, pos):
-        dists = np.exp(np.linalg.norm(self.goalset - pos, axis=1))
-        idx = np.argmin(dists)
-        # print(idx)
-        return idx, dists[idx]/sum(dists)
-
     """ problem specific cost function """
     def trajcost(self, xi):
         xi = xi.reshape(self.n_waypoints,self.n_joints)
@@ -122,6 +115,13 @@ class TrajOpt(object):
             xi = res.x.reshape(self.n_waypoints,self.n_joints)
             self.xi0[idx, :, :] = xi
 
+    """ Find most likely goal using Bayesian Inference """
+    def predict(self, pos):
+        dists = np.exp(np.linalg.norm(self.goalset - pos, axis=1))
+        idx = np.argmin(dists)
+        # print(idx)
+        return idx, 1 - dists[idx]/sum(dists)
+
     """ Get robot action for legible trajectory"""
     def robot_action(self, pos, t):
         idx, conf = self.predict(pos)
@@ -134,7 +134,7 @@ class TrajOpt(object):
             req_pos = self.xi0[idx, self.n_waypoints-1, :]
         action = req_pos - pos
         action[0] = 0
-        print("Goal: {0:.2f}, Current: {1:.2f}, Diff: {2:.2f}".format(req_pos[1], pos[1], action[1]))
+        # print("Goal: {0:.2f}, Current: {1:.2f}, Diff: {2:.2f}".format(req_pos[1], pos[1], action[1]))
         return action, conf
 
 
@@ -269,6 +269,8 @@ def main():
                 pygame.quit(); sys.exit()
 
             action = a_h + P_gain * a_r
+            # print("Confidence: {0:2f}".format(conf))
+            # action[1] =  (1 - conf) * a_h[1] + P_gain * conf * a_r[1]
             q += action
 
             # dynamics
