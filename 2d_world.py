@@ -50,9 +50,9 @@ class TrajOpt(object):
 
     """ Find most likely goal using Bayesian Inference """
     def predict(self, pos):
-        dists = np.linalg.norm(self.goalset - pos, axis=1)
-        idx = np.argmax(dists)
-        print(idx)
+        dists = np.exp(np.linalg.norm(self.goalset - pos, axis=1))
+        idx = np.argmin(dists)
+        # print(idx)
         return idx, dists[idx]/sum(dists)
 
     """ problem specific cost function """
@@ -62,12 +62,12 @@ class TrajOpt(object):
         smoothcost_xi = 0
         dist2goal = 0
         cost_scale = len(xi)
-        for idx in range(1, self.n_waypoints):
+        for idx in range(self.n_waypoints):
             # state cost goes here
             point = xi[idx]
             costs = []
             for i in range(len(self.goalset)):
-                costs.append(-np.exp(np.linalg.norm(self.goalset[i] - point)))
+                costs.append(np.exp(np.linalg.norm(self.goalset[i] - point)))
             cost_state = costs[self.goal_idx] / np.sum(costs)
             cost_total += cost_state * cost_scale
             dist2goal += np.linalg.norm(self.goalset[self.goal_idx] - point)
@@ -75,8 +75,8 @@ class TrajOpt(object):
                 cost_scale = len(xi) - idx
             smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
         # perhaps you have some overall trajectory cost
-        cost_total += 15 * smoothcost_xi
-        cost_total += 0.1 * dist2goal
+        cost_total += 20 * smoothcost_xi
+        # cost_total += 0.1 * dist2goal
         return cost_total
 
     """ limit the actions to the given action set for trajectory"""
@@ -122,19 +122,25 @@ class TrajOpt(object):
             xi = res.x.reshape(self.n_waypoints,self.n_joints)
             self.xi0[idx, :, :] = xi
 
-    """ P control to nudge user towards legible trajectory """
+    """ Get robot action for legible trajectory"""
     def robot_action(self, pos, t):
         idx, conf = self.predict(pos)
+        traj_idx = np.where(self.xi0[idx, :, 0] > pos[0])
+
         try:
-            req_pos = self.xi0[idx, t, :]
+            # req_pos = self.xi0[idx, t, :]
+            req_pos = self.xi0[idx, traj_idx[0][0], :]
         except IndexError:
             req_pos = self.xi0[idx, self.n_waypoints-1, :]
-        return req_pos - pos, conf
+        action = req_pos - pos
+        action[0] = 0
+        print("Goal: {0:.2f}, Current: {1:.2f}, Diff: {2:.2f}".format(req_pos[1], pos[1], action[1]))
+        return action, conf
 
 
     """ Plot legible trajectories """
     def plot(self):
-        # fig, ax = plt.subplots()
+        fig, ax = plt.subplots()
         for i in range(len(self.goalset)):
             ax.plot(self.xi0[i, :, 0], self.xi0[i, :, 1])
 
@@ -193,8 +199,8 @@ def main():
     postition_gray = np.asarray([0., 0.])
     obs_position = postition_blue.tolist() + postition_green.tolist() + postition_gray.tolist()
 
-    opt = TrajOpt(position_player, [postition_blue, postition_green])
-    P_gain = 0.01
+    opt = TrajOpt(position_player, [postition_green, postition_blue])
+    P_gain = 0.1
 
     plot = False
     if plot:
@@ -249,10 +255,11 @@ def main():
             a_r = np.asarray([0, 0])
             # Get robot action only if human acts
             if not sum(a_h) == 0:
-                if count % 10:
+                if count % 30:
                     t += 1
                 a_r, conf = opt.robot_action(q, t)
                 a_r = np.clip(a_r, -0.05, 0.05)
+            # print(a_r)
 
             if stop:
                 pickle.dump( demonstration, open( savename, "wb" ) )
