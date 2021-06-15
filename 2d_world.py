@@ -38,104 +38,181 @@ class TrajOpt(object):
         self.home = home
         # Set of all possible goals
         self.goalset = goals
+        self.n_goals = len(goals)
         # current predicted goal
         self.goal_idx = None
-        self.xi0 = np.zeros((len(goals), self.n_waypoints, self.n_joints))
+        # self.xi0 = np.zeros((len(goals), self.n_waypoints, self.n_joints))
+        self.curr_pos = home
+        # Create set of possible robot actions
+        self.n_actions = 10
         self.action_limit = 0.05
-        for waypoint in range(self.n_waypoints):
-            for goal in range(len(goals)):
-                self.xi0[goal, waypoint, :] = self.home + waypoint /(self.n_waypoints - 1.0)\
-                                                 * (self.goalset[goal] - self.home)
-        self.optimize()
+        # self.actionset = np.zeros((self.n_actions, 2))
+        self.create_actionset()
+        self.beta = 1.0
+        # for waypoint in range(self.n_waypoints):
+        #     for goal in range(len(goals)):
+        #         self.xi0[goal, waypoint, :] = self.home + waypoint /(self.n_waypoints - 1.0)\
+        #                                          * (self.goalset[goal] - self.home)
+        # self.optimize()
 
-    """ problem specific cost function """
-    def trajcost(self, xi):
-        xi = xi.reshape(self.n_waypoints,self.n_joints)
-        cost_total = 0
-        smoothcost_xi = 0
-        dist2goal = 0
-        cost_scale = len(xi)
-        for idx in range(self.n_waypoints):
-            # state cost goes here
-            point = xi[idx]
-            costs = []
-            for i in range(len(self.goalset)):
-                costs.append(np.exp(np.linalg.norm(self.goalset[i] - point)))
-            cost_state = costs[self.goal_idx] / np.sum(costs)
-            cost_total += cost_state * cost_scale
-            dist2goal += np.linalg.norm(self.goalset[self.goal_idx] - point)
-            if cost_scale > 1:
-                cost_scale = len(xi) - idx
-            smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
-        # perhaps you have some overall trajectory cost
-        cost_total += 20 * smoothcost_xi
-        # cost_total += 0.1 * dist2goal
-        return cost_total
+    """ Create discrete action set for robot """
+    def create_actionset(self):
+        angles = np.linspace(0, 2 * np.pi, self.n_actions)
+        self.actionset = np.asarray([self.action_limit * np.cos(angles),\
+                            self.action_limit * np.sin(angles) ])\
+                            .reshape(self.n_actions, 2)
 
-    """ limit the actions to the given action set for trajectory"""
-    def action_cons(self, xi):
-        xi = xi.reshape(self.n_waypoints,self.n_joints)
-        length = 0
-        prev_point = xi[0, :]
-        max_diff = 0.
-        for idx in range(1, len(xi)):
-            point = xi[idx, :]
-            diff = point - prev_point
-            if max(diff) > max_diff:
-                max_diff = max(diff)
-            prev_point = point
-                    
-        return self.action_limit - max_diff
-
-    def start_cons(self, xi):
-        xi = xi.reshape(self.n_waypoints,self.n_joints)
-        start = xi[0,:]
-        end = xi[-1, :]
-        return np.linalg.norm(start - self.home)
-
-    def end_cons(self, xi):
-        xi = xi.reshape(self.n_waypoints,self.n_joints)
-        start = xi[0,:]
-        end = xi[-1, :]
-        return np.linalg.norm(end - self.goalset[self.goal_idx])
-
-    """ use scipy optimizer to get optimal trajectory """
-    def optimize(self, method='SLSQP'):
-
-        cons = [{'type': 'eq', 'fun': self.start_cons},
-        {'type': 'eq', 'fun': self.end_cons},
-        {'type': 'ineq', 'fun': self.action_cons}]
-        for idx in range(len(self.goalset)):
-            print("Optimizing goal {}".format(idx))
-            self.goal_idx = idx
-            start_t = time.time()
-            xi0 = self.xi0[idx, :, :]
-            xi0.reshape(-1)
-            res = minimize(self.trajcost, xi0, method=method, constraints=cons)
-            xi = res.x.reshape(self.n_waypoints,self.n_joints)
-            self.xi0[idx, :, :] = xi
-
-    """ Find most likely goal using Bayesian Inference """
+    """ Predict human's goal given current position """
     def predict(self, pos):
         dists = np.exp(np.linalg.norm(self.goalset - pos, axis=1))
-        idx = np.argmin(dists)
-        # print(idx)
-        return idx, 1 - dists[idx]/sum(dists)
+        return np.argmin(dists)
 
-    """ Get robot action for legible trajectory"""
-    def robot_action(self, pos, t):
-        idx, conf = self.predict(pos)
-        traj_idx = np.where(self.xi0[idx, :, 0] > pos[0])
+    """ Run Bayes for a given action """
+    def bayes(self, pos, a):
+        beta = 1.0
+        P = []
+        for g in self.goalset:
+            num = np.exp(-beta * np.linalg.norm(g - (pos + a)))
+            den = 0
+            for ap in self.actionset:
+                den += np.exp(-beta * np.linalg.norm(g - (pos + ap)))
+            P.append(num / den)
+        P = np.asarray(P)
+        return P / sum(P)
+        # P = np.zeros(self.n_goals)
+        # for i,goal in enumerate(self.goalset):
+        #     num = np.exp(-self.beta * np.linalg.norm(goal - (pos + a)))
+        #     den = np.sum(np.exp(-self.beta * \
+        #                 np.linalg.norm(goal - (pos + self.actionset), axis=1)))
+        #     P[i] = num/den
+        # return P/sum(P)
 
-        try:
-            # req_pos = self.xi0[idx, t, :]
-            req_pos = self.xi0[idx, traj_idx[0][0], :]
-        except IndexError:
-            req_pos = self.xi0[idx, self.n_waypoints-1, :]
-        action = req_pos - pos
-        action[0] = 0
-        # print("Goal: {0:.2f}, Current: {1:.2f}, Diff: {2:.2f}".format(req_pos[1], pos[1], action[1]))
-        return action, conf
+    """ Get best robot action for given goal """
+    def robot_action(self, pos):
+        self.goal_idx = self.predict(pos)
+        # print(self.goal_idx)
+        max_b = 0
+        best_action = np.asarray([0, 0])
+        for a in self.actionset:
+            belief = self.bayes(pos, a)
+            if belief[self.goal_idx] >= max_b:
+                best_action = a
+                max_b = belief[self.goal_idx]
+        return best_action
+
+    """ problem specific cost function """
+    # def trajcost(self, xi):
+    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
+    #     cost_total = 0
+    #     smoothcost_xi = 0
+    #     dist2goal = 0
+    #     cost_scale = len(xi)
+    #     for idx in range(self.n_waypoints):
+    #         # state cost goes here
+    #         point = xi[idx]
+    #         costs = []
+    #         for i in range(len(self.goalset)):
+    #             costs.append(np.exp(np.linalg.norm(self.goalset[i] - point)))
+    #         cost_state = costs[self.goal_idx] / np.sum(costs)
+    #         cost_total += cost_state * cost_scale
+    #         dist2goal += np.linalg.norm(self.goalset[self.goal_idx] - point)
+    #         if cost_scale > 1:
+    #             cost_scale = len(xi) - idx
+    #         smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
+    #     # perhaps you have some overall trajectory cost
+    #     cost_total += 20 * smoothcost_xi
+    #     # cost_total += 0.1 * dist2goal
+    #     return cost_total
+
+    # """ limit the actions to the given action set for trajectory"""
+    # def action_cons(self, xi):
+    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
+    #     length = 0
+    #     prev_point = xi[0, :]
+    #     max_diff = 0.
+    #     for idx in range(1, len(xi)):
+    #         point = xi[idx, :]
+    #         diff = point - prev_point
+    #         if max(diff) > max_diff:
+    #             max_diff = max(diff)
+    #         prev_point = point
+                    
+    #     return self.action_limit - max_diff
+
+    # def start_cons(self, xi):
+    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
+    #     start = xi[0,:]
+    #     end = xi[-1, :]
+    #     return np.linalg.norm(start - self.home)
+
+    # def end_cons(self, xi):
+    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
+    #     start = xi[0,:]
+    #     end = xi[-1, :]
+    #     return np.linalg.norm(end - self.goalset[self.goal_idx])
+
+    """ use scipy optimizer to get optimal trajectory """
+    # def optimize(self, method='SLSQP'):
+
+    #     cons = [{'type': 'eq', 'fun': self.start_cons},
+    #     {'type': 'eq', 'fun': self.end_cons},
+    #     {'type': 'ineq', 'fun': self.action_cons}]
+    #     for idx in range(len(self.goalset)):
+    #         print("Optimizing goal {}".format(idx))
+    #         self.goal_idx = idx
+    #         start_t = time.time()
+    #         xi0 = self.xi0[idx, :, :]
+    #         xi0.reshape(-1)
+    #         res = minimize(self.trajcost, xi0, method=method, constraints=cons)
+    #         xi = res.x.reshape(self.n_waypoints,self.n_joints)
+    #         self.xi0[idx, :, :] = xi
+    
+    # """ Get robot action for legible trajectory"""
+    # def robot_action(self, pos, t):
+    #     idx, conf = self.predict(pos)
+    #     traj_idx = np.where(self.xi0[idx, :, 0] > pos[0])
+
+    #     try:
+    #         # req_pos = self.xi0[idx, t, :]
+    #         req_pos = self.xi0[idx, traj_idx[0][0], :]
+    #     except IndexError:
+    #         req_pos = self.xi0[idx, self.n_waypoints-1, :]
+    #     action = req_pos - pos
+    #     action[0] = 0
+    #     # print("Goal: {0:.2f}, Current: {1:.2f}, Diff: {2:.2f}".format(req_pos[1], pos[1], action[1]))
+    #     return action, conf
+
+    # """ Cost of action taken by robot """
+    # def trajcost(self, a):
+    #     pos = self.curr_pos + a
+    #     dists = np.exp(-np.linalg.norm(self.goalset - pos, axis=1))
+    #     return 1-dists[self.goal_idx]/sum(dists)
+
+    # """ limit the actions to the given action set for trajectory"""
+    # def action_cons(self, a):
+    #     return self.action_limit - max(abs(a))
+
+    # """ use scipy optimizer to get optimal trajectory """
+    # def optimize(self, method='SLSQP'):
+    #     cons = [{'type': 'ineq', 'fun': self.action_cons}]
+    #     xi0 = np.asarray([0., 0.])
+    #     res = minimize(self.trajcost, xi0, method=method, constraints=cons)
+    #     return res.x
+
+    # """ Find most likely goal using Bayesian Inference """
+    # def predict(self, pos):
+    #     dists = np.exp(np.linalg.norm(self.goalset - pos, axis=1))
+    #     idx = np.argmin(dists)
+    #     # print(idx)
+    #     return idx, 1 - dists[idx]/sum(dists)
+
+    # """ Get robot action for legible trajectory"""
+    # def robot_action(self, pos):
+    #     self.curr_pos = pos
+    #     self.goal_idx, conf = self.predict(pos)
+    #     action = self.optimize()
+    #     print("Goal: {0}, action: {1}".format(self.goal_idx, action))
+    #     return action, conf
 
 
     """ Plot legible trajectories """
@@ -143,7 +220,6 @@ class TrajOpt(object):
         fig, ax = plt.subplots()
         for i in range(len(self.goalset)):
             ax.plot(self.xi0[i, :, 0], self.xi0[i, :, 1])
-
         plt.show()
 
         
@@ -194,8 +270,8 @@ def main():
     savename = "data/demos/" + filename + ".pkl"
 
     position_player = np.asarray([.1, .35])
-    postition_blue = np.asarray([0.8, 0.5])
-    postition_green = np.asarray([0.8, 0.2])
+    postition_blue = np.asarray([0.8, 0.4])
+    postition_green = np.asarray([0.8, 0.3])
     postition_gray = np.asarray([0., 0.])
     obs_position = postition_blue.tolist() + postition_green.tolist() + postition_gray.tolist()
 
@@ -253,13 +329,12 @@ def main():
             a_h = 0.01 * np.asarray([z1, z2])
             conf = 0.
             a_r = np.asarray([0, 0])
+            opt.robot_action(q)
             # Get robot action only if human acts
             if not sum(a_h) == 0:
-                if count % 30:
-                    t += 1
-                a_r, conf = opt.robot_action(q, t)
-                a_r = np.clip(a_r, -0.05, 0.05)
-            # print(a_r)
+                a_r, conf = opt.robot_action(q)
+                # a_r = np.clip(a_r, -0.05, 0.05)
+            print(a_r)
 
             if stop:
                 pickle.dump( demonstration, open( savename, "wb" ) )
