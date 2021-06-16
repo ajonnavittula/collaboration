@@ -29,39 +29,42 @@ class Joystick(object):
         stop = self.gamepad.get_button(0)
         return [z1, z2], start, stop
 
-class TrajOpt(object):
+class Robot(object):
 
     def __init__(self, home, goals):
         """ set hyperparameters """
-        self.n_waypoints = 11
-        self.n_joints = 2
         self.home = home
         # Set of all possible goals
         self.goalset = goals
         self.n_goals = len(goals)
         # current predicted goal
         self.goal_idx = None
-        # self.xi0 = np.zeros((len(goals), self.n_waypoints, self.n_joints))
         self.curr_pos = home
-        # Create set of possible robot actions
-        self.n_actions = 30
-        self.action_limit = 0.05
-        # self.actionset = np.zeros((self.n_actions, 2))
-        self.create_actionset()
+        # Number of possible robot and human actions
+        self.r_actions = 30
+        self.h_actions = 8
+        # Action limits for robot and human
+        self.r_limit = 0.05
+        self.h_limit = 0.1
+        # Action sets for robot and human
+        self.r_actionset = None
+        self.h_actionset = None
+        self.create_actionsets()
+        # Hyperparameter - human rationality for Boltzmann
         self.beta = 1.0
+        # Plot contour map
         self.plot = False
-        # for waypoint in range(self.n_waypoints):
-        #     for goal in range(len(goals)):
-        #         self.xi0[goal, waypoint, :] = self.home + waypoint /(self.n_waypoints - 1.0)\
-        #                                          * (self.goalset[goal] - self.home)
-        # self.optimize()
 
     """ Create discrete action set for robot """
-    def create_actionset(self):
-        angles = np.linspace(0, 2 * np.pi, self.n_actions)
-        self.actionset = np.asarray([self.action_limit * np.cos(angles),\
-                            self.action_limit * np.sin(angles) ])\
-                            .reshape(self.n_actions, 2)
+    def create_actionsets(self):
+        angles = np.linspace(0, 2 * np.pi, self.r_actions)
+        self.r_actionset = np.asarray([self.r_limit * np.cos(angles),\
+                            self.r_limit * np.sin(angles) ])\
+                            .reshape(self.r_actions, 2)
+        angles = np.linspace(0, 2 * np.pi, self.h_actions)
+        self.h_actionset = np.asarray([self.h_limit * np.cos(angles),\
+                            self.h_limit * np.sin(angles) ])\
+                            .reshape(self.h_actions, 2)
 
     """ Predict human's goal given current position """
     def predict(self, pos):
@@ -69,13 +72,19 @@ class TrajOpt(object):
         return np.argmin(dists)
 
     """ Run Bayes for a given action """
-    def bayes(self, pos, a):
+    def bayes(self, pos, a, agent="robot"):
         beta = 100.
         P = []
         for g in self.goalset:
             num = np.exp(-beta * np.linalg.norm(g - (pos + a)))
             den = 0
-            for ap in self.actionset:
+            # Computing bayes for human or robot actions?
+            if agent == "robot":
+                actionset = self.r_actionset
+            else:
+                actionset = self.h_actionset
+                
+            for ap in actionset:
                 den += np.exp(-beta * np.linalg.norm(g - (pos + ap)))
             P.append(num / den)
         P = np.asarray(P)
@@ -104,124 +113,8 @@ class TrajOpt(object):
                 legible_action = a
                 max_b = belief[self.goal_idx]
         alpha = np.clip(dist2goal / start2goal, 0., 1.0)
-        # print(alpha)
         best_action = alpha * legible_action + (1 - alpha) * dist_action
         return best_action
-
-    """ problem specific cost function """
-    # def trajcost(self, xi):
-    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
-    #     cost_total = 0
-    #     smoothcost_xi = 0
-    #     dist2goal = 0
-    #     cost_scale = len(xi)
-    #     for idx in range(self.n_waypoints):
-    #         # state cost goes here
-    #         point = xi[idx]
-    #         costs = []
-    #         for i in range(len(self.goalset)):
-    #             costs.append(np.exp(np.linalg.norm(self.goalset[i] - point)))
-    #         cost_state = costs[self.goal_idx] / np.sum(costs)
-    #         cost_total += cost_state * cost_scale
-    #         dist2goal += np.linalg.norm(self.goalset[self.goal_idx] - point)
-    #         if cost_scale > 1:
-    #             cost_scale = len(xi) - idx
-    #         smoothcost_xi += np.linalg.norm(xi[idx,:] - xi[idx-1,:])**2
-    #     # perhaps you have some overall trajectory cost
-    #     cost_total += 20 * smoothcost_xi
-    #     # cost_total += 0.1 * dist2goal
-    #     return cost_total
-
-    # """ limit the actions to the given action set for trajectory"""
-    # def action_cons(self, xi):
-    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
-    #     length = 0
-    #     prev_point = xi[0, :]
-    #     max_diff = 0.
-    #     for idx in range(1, len(xi)):
-    #         point = xi[idx, :]
-    #         diff = point - prev_point
-    #         if max(diff) > max_diff:
-    #             max_diff = max(diff)
-    #         prev_point = point
-                    
-    #     return self.action_limit - max_diff
-
-    # def start_cons(self, xi):
-    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
-    #     start = xi[0,:]
-    #     end = xi[-1, :]
-    #     return np.linalg.norm(start - self.home)
-
-    # def end_cons(self, xi):
-    #     xi = xi.reshape(self.n_waypoints,self.n_joints)
-    #     start = xi[0,:]
-    #     end = xi[-1, :]
-    #     return np.linalg.norm(end - self.goalset[self.goal_idx])
-
-    """ use scipy optimizer to get optimal trajectory """
-    # def optimize(self, method='SLSQP'):
-
-    #     cons = [{'type': 'eq', 'fun': self.start_cons},
-    #     {'type': 'eq', 'fun': self.end_cons},
-    #     {'type': 'ineq', 'fun': self.action_cons}]
-    #     for idx in range(len(self.goalset)):
-    #         print("Optimizing goal {}".format(idx))
-    #         self.goal_idx = idx
-    #         start_t = time.time()
-    #         xi0 = self.xi0[idx, :, :]
-    #         xi0.reshape(-1)
-    #         res = minimize(self.trajcost, xi0, method=method, constraints=cons)
-    #         xi = res.x.reshape(self.n_waypoints,self.n_joints)
-    #         self.xi0[idx, :, :] = xi
-    
-    # """ Get robot action for legible trajectory"""
-    # def robot_action(self, pos, t):
-    #     idx, conf = self.predict(pos)
-    #     traj_idx = np.where(self.xi0[idx, :, 0] > pos[0])
-
-    #     try:
-    #         # req_pos = self.xi0[idx, t, :]
-    #         req_pos = self.xi0[idx, traj_idx[0][0], :]
-    #     except IndexError:
-    #         req_pos = self.xi0[idx, self.n_waypoints-1, :]
-    #     action = req_pos - pos
-    #     action[0] = 0
-    #     # print("Goal: {0:.2f}, Current: {1:.2f}, Diff: {2:.2f}".format(req_pos[1], pos[1], action[1]))
-    #     return action, conf
-
-    # """ Cost of action taken by robot """
-    # def trajcost(self, a):
-    #     pos = self.curr_pos + a
-    #     dists = np.exp(-np.linalg.norm(self.goalset - pos, axis=1))
-    #     return 1-dists[self.goal_idx]/sum(dists)
-
-    # """ limit the actions to the given action set for trajectory"""
-    # def action_cons(self, a):
-    #     return self.action_limit - max(abs(a))
-
-    # """ use scipy optimizer to get optimal trajectory """
-    # def optimize(self, method='SLSQP'):
-    #     cons = [{'type': 'ineq', 'fun': self.action_cons}]
-    #     xi0 = np.asarray([0., 0.])
-    #     res = minimize(self.trajcost, xi0, method=method, constraints=cons)
-    #     return res.x
-
-    # """ Find most likely goal using Bayesian Inference """
-    # def predict(self, pos):
-    #     dists = np.exp(np.linalg.norm(self.goalset - pos, axis=1))
-    #     idx = np.argmin(dists)
-    #     # print(idx)
-    #     return idx, 1 - dists[idx]/sum(dists)
-
-    # """ Get robot action for legible trajectory"""
-    # def robot_action(self, pos):
-    #     self.curr_pos = pos
-    #     self.goal_idx, conf = self.predict(pos)
-    #     action = self.optimize()
-    #     print("Goal: {0}, action: {1}".format(self.goal_idx, action))
-    #     return action, conf
-
 
     """ Plot legible trajectories """
     def plot_arrow(self):
