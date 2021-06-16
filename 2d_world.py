@@ -44,11 +44,12 @@ class TrajOpt(object):
         # self.xi0 = np.zeros((len(goals), self.n_waypoints, self.n_joints))
         self.curr_pos = home
         # Create set of possible robot actions
-        self.n_actions = 10
+        self.n_actions = 30
         self.action_limit = 0.05
         # self.actionset = np.zeros((self.n_actions, 2))
         self.create_actionset()
         self.beta = 1.0
+        self.plot = False
         # for waypoint in range(self.n_waypoints):
         #     for goal in range(len(goals)):
         #         self.xi0[goal, waypoint, :] = self.home + waypoint /(self.n_waypoints - 1.0)\
@@ -69,7 +70,7 @@ class TrajOpt(object):
 
     """ Run Bayes for a given action """
     def bayes(self, pos, a):
-        beta = 1.0
+        beta = 100.
         P = []
         for g in self.goalset:
             num = np.exp(-beta * np.linalg.norm(g - (pos + a)))
@@ -79,25 +80,32 @@ class TrajOpt(object):
             P.append(num / den)
         P = np.asarray(P)
         return P / sum(P)
-        # P = np.zeros(self.n_goals)
-        # for i,goal in enumerate(self.goalset):
-        #     num = np.exp(-self.beta * np.linalg.norm(goal - (pos + a)))
-        #     den = np.sum(np.exp(-self.beta * \
-        #                 np.linalg.norm(goal - (pos + self.actionset), axis=1)))
-        #     P[i] = num/den
-        # return P/sum(P)
+
 
     """ Get best robot action for given goal """
     def robot_action(self, pos):
-        self.goal_idx = self.predict(pos)
+        if not self.plot:
+            self.goal_idx = self.predict(pos)
+        start2goal = np.linalg.norm(self.goalset[self.goal_idx] - self.home)
+        dist2goal = np.linalg.norm(self.goalset[self.goal_idx] - pos)
         # print(self.goal_idx)
         max_b = 0
+        min_dist = np.inf
         best_action = np.asarray([0, 0])
+        legible_action = np.asarray([0, 0])
+        dist_action = np.asarray([0, 0])
         for a in self.actionset:
             belief = self.bayes(pos, a)
+            dist = np.linalg.norm(self.goalset[self.goal_idx] - (pos + a))
+            if dist < min_dist:
+                dist_action = a
+                min_dist = dist
             if belief[self.goal_idx] >= max_b:
-                best_action = a
+                legible_action = a
                 max_b = belief[self.goal_idx]
+        alpha = np.clip(dist2goal / start2goal, 0., 1.0)
+        # print(alpha)
+        best_action = alpha * legible_action + (1 - alpha) * dist_action
         return best_action
 
     """ problem specific cost function """
@@ -216,10 +224,19 @@ class TrajOpt(object):
 
 
     """ Plot legible trajectories """
-    def plot(self):
+    def plot_arrow(self):
+        if self.plot:
+            self.goal_idx = 1
+        print(self.goalset[self.goal_idx])
         fig, ax = plt.subplots()
-        for i in range(len(self.goalset)):
-            ax.plot(self.xi0[i, :, 0], self.xi0[i, :, 1])
+        sx = np.linspace(-1, 1.0, 11)
+        sy = np.linspace(-1, 1.0, 11)
+        for x in sx:
+            for y in sy:
+                s = np.array([x, y])
+                astar = self.robot_action(s)
+                ax.arrow(x, y, astar[0], astar[1], head_width=0.1)
+        
         plt.show()
 
         
@@ -276,11 +293,11 @@ def main():
     obs_position = postition_blue.tolist() + postition_green.tolist() + postition_gray.tolist()
 
     opt = TrajOpt(position_player, [postition_green, postition_blue])
-    P_gain = 0.1
+    P_gain = 0.2
 
-    plot = False
-    if plot:
-        opt.plot()
+    opt.plot = False
+    if opt.plot:
+        opt.plot_arrow()
     else:
         clock = pygame.time.Clock()
         pygame.init()
@@ -334,7 +351,7 @@ def main():
             if not sum(a_h) == 0:
                 a_r, conf = opt.robot_action(q)
                 # a_r = np.clip(a_r, -0.05, 0.05)
-            print(a_r)
+            # print(a_r)
 
             if stop:
                 pickle.dump( demonstration, open( savename, "wb" ) )
