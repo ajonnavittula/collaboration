@@ -42,10 +42,10 @@ class Robot(object):
         self.curr_pos = home
         # Number of possible robot and human actions
         self.r_actions = 30
-        self.h_actions = 8
+        self.h_actions = 30
         # Action limits for robot and human
-        self.r_limit = 0.05
-        self.h_limit = 0.1
+        self.r_limit = 0.005
+        self.h_limit = 0.01
         # Action sets for robot and human
         self.r_actionset = None
         self.h_actionset = None
@@ -58,13 +58,13 @@ class Robot(object):
     """ Create discrete action set for robot """
     def create_actionsets(self):
         angles = np.linspace(0, 2 * np.pi, self.r_actions)
-        self.r_actionset = np.asarray([self.r_limit * np.cos(angles),\
-                            self.r_limit * np.sin(angles) ])\
-                            .reshape(self.r_actions, 2)
+        r = self.r_limit
+        self.r_actionset = np.column_stack((r * np.cos(angles), r * np.sin(angles)))
+        self.r_actionset = np.vstack((self.r_actionset, np.array([0.,  0.])))
         angles = np.linspace(0, 2 * np.pi, self.h_actions)
-        self.h_actionset = np.asarray([self.h_limit * np.cos(angles),\
-                            self.h_limit * np.sin(angles) ])\
-                            .reshape(self.h_actions, 2)
+        r = self.h_limit
+        self.h_actionset = np.column_stack((r * np.cos(angles), r * np.sin(angles)))
+        self.h_actionset = np.vstack((self.h_actionset, np.array([0.,  0.])))
 
     """ Predict human's goal given current position """
     def predict(self, pos):
@@ -83,7 +83,7 @@ class Robot(object):
                 actionset = self.r_actionset
             else:
                 actionset = self.h_actionset
-                
+
             for ap in actionset:
                 den += np.exp(-beta * np.linalg.norm(g - (pos + ap)))
             P.append(num / den)
@@ -92,29 +92,40 @@ class Robot(object):
 
 
     """ Get best robot action for given goal """
-    def robot_action(self, pos):
+    def robot_action(self, pos, a_h):
+        eps = 0.01
         if not self.plot:
-            self.goal_idx = self.predict(pos)
-        start2goal = np.linalg.norm(self.goalset[self.goal_idx] - self.home)
-        dist2goal = np.linalg.norm(self.goalset[self.goal_idx] - pos)
-        # print(self.goal_idx)
+            belief = self.bayes(pos, a_h, agent="human")
+        self.goal_idx = 1
+
+        # start2goal = np.linalg.norm(self.goalset[self.goal_idx] - self.home)
+        # dist2goal = np.linalg.norm(self.goalset[self.goal_idx] - pos)
+        # eps = np.clip(dist2goal / start2goal, 0., 1.0)
+        
         max_b = 0
         min_dist = np.inf
         best_action = np.asarray([0, 0])
         legible_action = np.asarray([0, 0])
         dist_action = np.asarray([0, 0])
-        for a in self.actionset:
+        Qmax = -np.Inf
+        Q = {}
+        for a in self.r_actionset:
+            Q[str(a)] = np.linalg.norm(self.goalset[self.goal_idx] - pos) - \
+                        np.linalg.norm(self.goalset[self.goal_idx] - (pos + a))
+            if Q[str(a)] > Qmax:
+                Qmax = Q[str(a)]
+        for a in self.r_actionset:
             belief = self.bayes(pos, a)
-            dist = np.linalg.norm(self.goalset[self.goal_idx] - (pos + a))
-            if dist < min_dist:
-                dist_action = a
-                min_dist = dist
-            if belief[self.goal_idx] >= max_b:
+            # dist = np.linalg.norm(self.goalset[self.goal_idx] - (pos + a))
+            # if dist < min_dist:
+            #     dist_action = a
+            #     min_dist = dist
+            if belief[self.goal_idx] >= max_b and Qmax - Q[str(a)] < eps:
                 legible_action = a
                 max_b = belief[self.goal_idx]
-        alpha = np.clip(dist2goal / start2goal, 0., 1.0)
-        best_action = alpha * legible_action + (1 - alpha) * dist_action
-        return best_action
+        # best_action = alpha * legible_action + (1 - alpha) * dist_action
+        best_action = legible_action
+        return best_action, belief
 
     """ Plot legible trajectories """
     def plot_arrow(self):
@@ -174,6 +185,11 @@ class Player(pygame.sprite.Sprite):
         self.rect.y = (self.y * 500) + 100 - self.rect.size[1] / 2
 
 
+def human_input(state, goals, goal_idx):
+    v = goals[goal_idx] - state
+    unit_vec = v / np.linalg.norm(v)
+    return unit_vec * 0.01 + np.random.normal(0, 0.005, 2)
+
 def main():
 
     filename = sys.argv[1]
@@ -185,7 +201,7 @@ def main():
     postition_gray = np.asarray([0., 0.])
     obs_position = postition_blue.tolist() + postition_green.tolist() + postition_gray.tolist()
 
-    opt = TrajOpt(position_player, [postition_green, postition_blue])
+    opt = Robot(position_player, [postition_green, postition_blue])
     P_gain = 0.2
 
     opt.plot = False
@@ -236,13 +252,13 @@ def main():
             z1 = right - left
             z2 = down - up
 
-            a_h = 0.01 * np.asarray([z1, z2])
+            # a_h = 0.01 * np.asarray([z1, z2])
+            a_h = human_input(q, [postition_green, postition_blue], 1)
             conf = 0.
             a_r = np.asarray([0, 0])
-            opt.robot_action(q)
             # Get robot action only if human acts
             if not sum(a_h) == 0:
-                a_r, conf = opt.robot_action(q)
+                a_r, conf = opt.robot_action(q, a_h)
                 # a_r = np.clip(a_r, -0.05, 0.05)
             # print(a_r)
 
@@ -253,6 +269,7 @@ def main():
                 print("[*] I recorded this many datapoints: ", len(demonstration))
                 pygame.quit(); sys.exit()
 
+            P_gain = 0.
             action = a_h + P_gain * a_r
             # print("Confidence: {0:2f}".format(conf))
             # action[1] =  (1 - conf) * a_h[1] + P_gain * conf * a_r[1]
