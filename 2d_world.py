@@ -73,7 +73,7 @@ class Robot(object):
 
     """ Run Bayes for a given action """
     def bayes(self, pos, a, agent="robot"):
-        beta = 100.
+        beta = 1000.
         P = []
         for g in self.goalset:
             num = np.exp(-beta * np.linalg.norm(g - (pos + a)))
@@ -95,13 +95,10 @@ class Robot(object):
     def robot_action(self, pos, a_h):
         eps = 0.01
         if not self.plot:
-            belief = self.bayes(pos, a_h, agent="human")
+            h_belief = self.bayes(pos, a_h, agent="human")
         self.goal_idx = 1
-
-        # start2goal = np.linalg.norm(self.goalset[self.goal_idx] - self.home)
-        # dist2goal = np.linalg.norm(self.goalset[self.goal_idx] - pos)
-        # eps = np.clip(dist2goal / start2goal, 0., 1.0)
-        
+        # print("|a_h|: {}, conf: {}".\
+        #         format(np.linalg.norm(a_h), belief[self.goal_idx]))
         max_b = 0
         min_dist = np.inf
         best_action = np.asarray([0, 0])
@@ -125,7 +122,7 @@ class Robot(object):
                 max_b = belief[self.goal_idx]
         # best_action = alpha * legible_action + (1 - alpha) * dist_action
         best_action = legible_action
-        return best_action, belief
+        return best_action, h_belief[self.goal_idx]
 
     """ Plot legible trajectories """
     def plot_arrow(self):
@@ -185,10 +182,13 @@ class Player(pygame.sprite.Sprite):
         self.rect.y = (self.y * 500) + 100 - self.rect.size[1] / 2
 
 
-def human_input(state, goals, goal_idx):
+def human_input(state, goals, goal_idx, angle):
     v = goals[goal_idx] - state
     unit_vec = v / np.linalg.norm(v)
-    return unit_vec * 0.01 + np.random.normal(0, 0.005, 2)
+    rot_mat = np.array([[np.cos(angle), -np.sin(angle)],\
+                        [np.sin(angle), np.cos(angle)]])
+    rotated_vec = np.dot(rot_mat, unit_vec)
+    return rotated_vec * 0.01 #+ np.random.normal(0, 0.005, 2)
 
 def main():
 
@@ -212,28 +212,30 @@ def main():
         pygame.init()
         fps = 30
 
-        world = pygame.display.set_mode([700, 700])
+        # world = pygame.display.set_mode([700, 700])
 
         player = Player(position_player)
         blue = Object(postition_blue, [0, 0, 255])
         green = Object(postition_green, [0, 255, 0])
         gray = Object(postition_gray, [128, 128, 128])
 
-        sprite_list = pygame.sprite.Group()
-        sprite_list.add(player)
-        sprite_list.add(blue)
-        sprite_list.add(green)
-        sprite_list.add(gray)
+        # sprite_list = pygame.sprite.Group()
+        # sprite_list.add(player)
+        # sprite_list.add(blue)
+        # sprite_list.add(green)
+        # sprite_list.add(gray)
 
-        world.fill((0,0,0))
-        sprite_list.draw(world)
-        pygame.display.flip()
+        # world.fill((0,0,0))
+        # sprite_list.draw(world)
+        # pygame.display.flip()
         clock.tick(fps)
 
         demonstration = []
         sampletime = 5
         count = 0
         t = 0
+        angle = np.random.uniform(-np.pi/2, np.pi/2)
+        # angle = np.pi/3
         while True:
             q = np.asarray([player.x, player.y])
             # s = obs_position + q.tolist()
@@ -252,15 +254,14 @@ def main():
             z1 = right - left
             z2 = down - up
 
-            # a_h = 0.01 * np.asarray([z1, z2])
-            a_h = human_input(q, [postition_green, postition_blue], 1)
+            a_h = human_input(q, [postition_green, postition_blue], 1, angle)
             conf = 0.
             a_r = np.asarray([0, 0])
+
             # Get robot action only if human acts
             if not sum(a_h) == 0:
                 a_r, conf = opt.robot_action(q, a_h)
-                # a_r = np.clip(a_r, -0.05, 0.05)
-            # print(a_r)
+
 
             if stop:
                 pickle.dump( demonstration, open( savename, "wb" ) )
@@ -270,25 +271,39 @@ def main():
                 pygame.quit(); sys.exit()
 
             P_gain = 0.
-            action = a_h + P_gain * a_r
+            action = a_h #+ P_gain * a_r
             # print("Confidence: {0:2f}".format(conf))
-            # action[1] =  (1 - conf) * a_h[1] + P_gain * conf * a_r[1]
             q += action
 
             # dynamics
             player.update(q)
 
             # animate
-            world.fill((0,0,0))
-            sprite_list.draw(world)
-            pygame.display.flip()
-            clock.tick(fps)
+            # world.fill((0,0,0))
+            # sprite_list.draw(world)
+            # pygame.display.flip()
+            # clock.tick(fps)
 
-            pygame.event.pump()
+            # pygame.event.pump()
             # save
             if not count % sampletime:
                 demonstration.append(s)
             count += 1
 
+            if count > 2:
+                return [angle, conf]
+
+
 if __name__ == "__main__":
-    main()
+    data = []
+    filename = sys.argv[1]
+    savename = "data/demos/" + filename + ".pkl"
+    for i in range(250):
+        res = main()
+        data.append(res)
+        print("iter: {0}, theta: {1:2f}, conf: {2:2f}".format(i, res[0], res[1]))
+    print(data)
+    pickle.dump( data, open( savename, "wb" ) )
+
+    
+
