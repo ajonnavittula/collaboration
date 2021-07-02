@@ -188,7 +188,7 @@ def human_input(state, goals, goal_idx, angle):
     rot_mat = np.array([[np.cos(angle), -np.sin(angle)],\
                         [np.sin(angle), np.cos(angle)]])
     rotated_vec = np.dot(rot_mat, unit_vec)
-    return rotated_vec * 0.01 #+ np.random.normal(0, 0.005, 2)
+    return rotated_vec * 0.01 + np.random.normal(0, 0.005, 2)
 
 def main():
 
@@ -234,8 +234,8 @@ def main():
         sampletime = 5
         count = 0
         t = 0
-        angle = np.random.uniform(-np.pi/2, np.pi/2)
-        # angle = np.pi/3
+        # angle = np.random.uniform(-np.pi/2, np.pi/2)
+        angle = 60 * np.pi / 180
         while True:
             q = np.asarray([player.x, player.y])
             # s = obs_position + q.tolist()
